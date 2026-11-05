@@ -1,0 +1,23 @@
+#!/bin/sh
+# Apply the preferred mode whenever the virtio-gpu reports a display change
+# (host viewer window resized). Desktops without a display daemon (XFCE) don't do this.
+# Only touches the output when current != preferred, so our own modeset
+# (which emits another change event) is a no-op instead of a loop.
+apply() {
+    xrandr | awk '
+        / connected/ { out = $1; next }
+        /^ / && out {
+            cur = pref = ""
+            for (i = 2; i <= NF; i++) { if ($i ~ /\*/) cur = 1; if ($i ~ /\+/) pref = 1 }
+            if (cur) c[out] = $1
+            if (pref) p[out] = $1
+        }
+        END { for (o in p) if (c[o] != p[o]) print o, p[o] }
+    ' | while read -r out mode; do
+        xrandr --output "$out" --mode "$mode"
+    done
+}
+apply
+udevadm monitor --udev --subsystem-match=drm | while read -r line; do
+    case $line in *change*) sleep 0.3; apply ;; esac
+done
