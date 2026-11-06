@@ -1,0 +1,14 @@
+#!/bin/sh
+# Blind recovery for a black screen: switch each output off and back on.
+# Bound to Ctrl+Alt+R by install.sh. Logs each run so we can tell "key didn't fire" from "didn't help".
+# Key repeat can start several runs at once; only the first one proceeds.
+log="${XDG_CACHE_HOME:-$HOME/.cache}/vm-auto-resize-recover.log"
+exec 9> "${XDG_RUNTIME_DIR:-/tmp}/vm-auto-resize-recover.lock"
+flock -n 9 || exit 0
+echo "$(date +%T) recover" >> "$log"; sync "$log"
+for out in $(xrandr | awk '/ connected/ {print $1}'); do
+    xrandr --output "$out" --off
+    sleep 0.5
+    xrandr --output "$out" --auto
+done
+sleep 1

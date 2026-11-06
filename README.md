@@ -2,11 +2,35 @@
 
 Makes the guest resolution follow the VM window size. For KVM guests running XFCE (X11) on a Virtio GPU, viewed in virt-manager.
 
+## Using it
+
+Resize the VM window on the host. The guest follows about 3 to 5 seconds later: the watcher waits until the resize events stop, then applies the new size once.
+
+**Leave the guest alone until the resolution has changed.** Don't drag windows or otherwise work with the mouse inside the guest during that delay. If you do, the screen can go black and only a VM restart brings it back. See [Known limitation](#known-limitation).
+
 ## Why it's needed
 
 With **View → Resize to VM → Auto resize VM with window** enabled, the host tells the virtio-gpu the new window size, and the GPU reports a new preferred mode for `Virtual-1`. XFCE doesn't apply that mode, so the screen stays at its old size. KDE does, which is why resizing works out of the box there. `spice-vdagent` isn't involved: the host sends it no monitor-config message for virtio-gpu.
 
 `vm-auto-resize` is a small watcher that applies the preferred mode on each display change.
+
+## Known limitation
+
+If a window is being dragged inside the guest when the new mode is applied, the screen can go black and stay black. Typical sequence:
+
+1. Resize the VM window on the host.
+2. The resize takes a few seconds to reach the guest. Meanwhile you start dragging a window in the guest.
+3. When the delay is over, the screen goes black.
+
+Switching to a text console (Ctrl+Alt+F1) and back doesn't bring the picture back. Neither reliably does the recovery hotkey. Restarting the VM does.
+
+**Workaround:** after resizing the host window, wait for the guest resolution to change before using the mouse in the guest.
+
+What we found while investigating (the cause itself is not found):
+
+- **Not the guest's X server.** At the time the screen is black, X is running, the desktop is up and X's own screen contents are correct. Every call X makes to the kernel succeeds, and the kernel logs no error.
+- **Not a plain mode change.** 30 consecutive mode changes inside the guest, with no host resize and no mouse activity, never produced it.
+- **Not reproducible with the same host under Wayland.** A Fedora KDE (Wayland) guest on the same host and virtio GPU resizes without this problem. Changing the X server or the host's video model are untested ways forward.
 
 ## Install
 
@@ -18,8 +42,9 @@ This installs the files below. Run it again to update. It takes effect at the ne
 
 | File | Installed to | Purpose |
 | --- | --- | --- |
-| `vm-auto-resize` | `~/.local/bin/vm-auto-resize` | Watches `drm` events with `udevadm monitor` and sets each output to its preferred mode, only if the current mode differs. |
+| `vm-auto-resize` | `~/.local/bin/vm-auto-resize` | Watches `drm` events with `udevadm monitor`. After the events have been quiet for 3 seconds it sets each output to its preferred mode, only if the current mode differs. |
 | `vm-auto-resize.desktop` | `~/.config/autostart/vm-auto-resize.desktop` | Starts the watcher at login. `@BIN@` is replaced with the install directory. |
+| `vm-auto-resize-recover` | `~/.local/bin/vm-auto-resize-recover` | Switches each output off and on again. `install.sh` binds it to Ctrl+Alt+R in XFCE. Best effort only: it brought the picture back once and failed another time. |
 
 The "only if different" check matters. Applying a mode emits another change event, and a version that called `xrandr --auto` unconditionally looped and killed X.
 
@@ -27,6 +52,7 @@ The "only if different" check matters. Applying a mode emits another change even
 
 - virt-manager with auto-resize enabled as above.
 - Guest video model: Virtio.
+- `bash` (the watcher uses `read -t`), `udevadm`, `xrandr`, `flock`.
 
 ## Check it
 
@@ -39,6 +65,6 @@ Use the bracket pattern. `pgrep -f` or `pkill -f` with the plain name also match
 
 ## Troubleshooting
 
-- **Black screen after a resize:** restart the VM, then remove `~/.config/autostart/vm-auto-resize.desktop`.
+- **Black screen after a resize:** restart the VM. Pressing Ctrl+Alt+R first is worth a try, but don't count on it. To stop auto-resize altogether, remove `~/.config/autostart/vm-auto-resize.desktop`.
 - **No resize at all:** check that the watcher is running. Then run `udevadm monitor --udev --subsystem-match=drm` and resize the window; a `change` line should appear.
 - **Debugging `spice-vdagentd`:** use `-d -x`. Don't use `-f`: it means `--fake-uinput` and floods the log with `write /dev/uinput: Invalid argument`, which doesn't happen in normal operation.

@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # Apply the preferred mode whenever the virtio-gpu reports a display change
 # (host viewer window resized). Desktops without a display daemon (XFCE) don't do this.
 # Only touches the output when current != preferred, so our own modeset
@@ -19,5 +19,8 @@ apply() {
 }
 apply
 udevadm monitor --udev --subsystem-match=drm | while read -r line; do
-    case $line in *change*) sleep 0.3; apply ;; esac
+    case $line in *change*) ;; *) continue ;; esac
+    # The host sends a resize about every 2s while dragging; wait for quiet so we modeset once.
+    while read -t 3 -r line; do :; done
+    apply
 done
